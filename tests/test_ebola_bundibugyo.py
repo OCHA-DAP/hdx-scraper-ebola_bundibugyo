@@ -49,8 +49,8 @@ class TestParseFrenchDate:
 
 
 class TestMain:
-    def _make_xlsx(self, tmp_path: str, rows: list[dict]) -> str:
-        path = Path(tmp_path) / "test.xlsx"
+    def _make_xlsx(self, tmp_path: str, name: str, rows: list[dict]) -> str:
+        path = Path(tmp_path) / name
         pd.DataFrame(rows).to_excel(path, sheet_name="Data", index=False)
         return str(path)
 
@@ -61,22 +61,18 @@ class TestMain:
         rows2 = [{"Zone": "B", "Cases": 5}]
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            xlsx1 = self._make_xlsx(tmp_dir, rows1)
-            xlsx2 = self._make_xlsx(tmp_dir + "_2", rows2)
+            xlsx1 = self._make_xlsx(tmp_dir, "resource1.xlsx", rows1)
+            xlsx2 = self._make_xlsx(tmp_dir, "resource2.xlsx", rows2)
 
             resource1 = MagicMock()
             resource1.get_file_type.return_value = "xlsx"
-            resource1.get.return_value = (
-                "Données à la date du 10 janvier 2026"
-            )
+            resource1.get.return_value = "Données à la date du 10 janvier 2026"
             resource1.__getitem__ = MagicMock(return_value="resource1.xlsx")
             resource1.download.return_value = ("url1", xlsx1)
 
             resource2 = MagicMock()
             resource2.get_file_type.return_value = "xlsx"
-            resource2.get.return_value = (
-                "Données à la date du 15 mars 2026"
-            )
+            resource2.get.return_value = "Données à la date du 15 mars 2026"
             resource2.__getitem__ = MagicMock(return_value="resource2.xlsx")
             resource2.download.return_value = ("url2", xlsx2)
 
@@ -96,12 +92,8 @@ class TestMain:
                 ),
                 patch("tempfile.TemporaryDirectory") as mock_tmpdir,
             ):
-                mock_tmpdir.return_value.__enter__ = MagicMock(
-                    return_value=tmp_dir
-                )
-                mock_tmpdir.return_value.__exit__ = MagicMock(
-                    return_value=False
-                )
+                mock_tmpdir.return_value.__enter__ = MagicMock(return_value=tmp_dir)
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
                 main()
 
             assert (output_dir / "combined_ebola_data.csv").exists()
