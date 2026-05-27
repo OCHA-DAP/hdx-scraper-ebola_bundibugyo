@@ -5,6 +5,9 @@ name: Run script
 on:
   workflow_dispatch: # add run button in github
 
+env:
+  OUTPUT_DIR: output_data
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -30,6 +33,14 @@ jobs:
         run: |
           uv run --frozen python -m hdx.scraper.ebola_bundibugyo
 
+      - name: Deploy 🚀
+        if: always()
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: output_data
+          folder: ${{ env.OUTPUT_DIR }}
+          target-folder: ${{ env.OUTPUT_DIR }}
+
       - name: Send mail
         if: failure()
         uses: dawidd6/action-send-mail@v7
@@ -42,7 +53,6 @@ jobs:
           body: GitHub Actions run job for ${{github.repository}} failed!
           to: ${{vars.HDX_PIPELINE_EMAIL_LIST}}
           from: ${{secrets.HDX_PIPELINE_EMAIL_FROM}}
-          content_type: text/html
 
   workflow-keepalive:
     if: github.event_name == 'schedule'

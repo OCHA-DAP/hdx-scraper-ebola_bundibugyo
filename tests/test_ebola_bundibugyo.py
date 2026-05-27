@@ -49,37 +49,44 @@ class TestParseFrenchDate:
 
 
 class TestMain:
-    def _make_xlsx(self, tmp_path: str, name: str, rows: list[dict]) -> str:
+    def _make_xlsx(
+        self,
+        tmp_path: str,
+        name: str,
+        rows: list[dict],
+        sheet_name: str = "Data",
+    ) -> str:
         path = Path(tmp_path) / name
-        pd.DataFrame(rows).to_excel(path, sheet_name="Data", index=False)
+        pd.DataFrame(rows).to_excel(path, sheet_name=sheet_name, index=False)
         return str(path)
+
+    def _make_resource(self, filepath: str, description: str) -> MagicMock:
+        resource = MagicMock()
+        resource.get_format.return_value = "xlsx"
+        resource.get.return_value = description
+        resource.__getitem__ = MagicMock(return_value=Path(filepath).name)
+        resource.download.return_value = ("url", filepath)
+        return resource
 
     def test_main_combines_resources(self, configuration):
         from hdx.scraper.ebola_bundibugyo.__main__ import main
 
-        rows1 = [{"Zone": "A", "Cases": 10}]
-        rows2 = [{"Zone": "B", "Cases": 5}]
+        rows1 = [{"Admin2": "Zone A", "Cases": 10}]
+        rows2 = [{"Admin2": "Zone B", "Cases": 5}]
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             xlsx1 = self._make_xlsx(tmp_dir, "resource1.xlsx", rows1)
             xlsx2 = self._make_xlsx(tmp_dir, "resource2.xlsx", rows2)
 
-            resource1 = MagicMock()
-            resource1.get_file_type.return_value = "xlsx"
-            resource1.get.return_value = "Données à la date du 10 janvier 2026"
-            resource1.__getitem__ = MagicMock(return_value="resource1.xlsx")
-            resource1.download.return_value = ("url1", xlsx1)
-
-            resource2 = MagicMock()
-            resource2.get_file_type.return_value = "xlsx"
-            resource2.get.return_value = "Données à la date du 15 mars 2026"
-            resource2.__getitem__ = MagicMock(return_value="resource2.xlsx")
-            resource2.download.return_value = ("url2", xlsx2)
+            resource1 = self._make_resource(
+                xlsx1, "Données à la date du 10 janvier 2026"
+            )
+            resource2 = self._make_resource(xlsx2, "Données à la date du 15 mars 2026")
 
             mock_dataset = MagicMock()
             mock_dataset.get_resources.return_value = [resource1, resource2]
 
-            output_dir = Path(tmp_dir) / "saved_data"
+            output_dir = Path(tmp_dir) / "output_data"
 
             with (
                 patch(
@@ -106,13 +113,13 @@ class TestMain:
         from hdx.scraper.ebola_bundibugyo.__main__ import main
 
         csv_resource = MagicMock()
-        csv_resource.get_file_type.return_value = "csv"
+        csv_resource.get_format.return_value = "csv"
 
         mock_dataset = MagicMock()
         mock_dataset.get_resources.return_value = [csv_resource]
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            output_dir = Path(tmp_dir) / "saved_data"
+            output_dir = Path(tmp_dir) / "output_data"
 
             with (
                 patch(
@@ -129,6 +136,68 @@ class TestMain:
             assert not (output_dir / "combined_ebola_data.csv").exists()
             csv_resource.download.assert_not_called()
 
+    def test_main_fallback_to_first_sheet(self, configuration):
+        from hdx.scraper.ebola_bundibugyo.__main__ import main
+
+        rows = [{"Admin2": "Zone A", "Cases": 3}]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            xlsx = self._make_xlsx(tmp_dir, "resource.xlsx", rows, sheet_name="Sheet1")
+            resource = self._make_resource(xlsx, "Données à la date du 1 juin 2026")
+
+            mock_dataset = MagicMock()
+            mock_dataset.get_resources.return_value = [resource]
+            output_dir = Path(tmp_dir) / "output_data"
+
+            with (
+                patch(
+                    "hdx.scraper.ebola_bundibugyo.__main__.Dataset.read_from_hdx",
+                    return_value=mock_dataset,
+                ),
+                patch(
+                    "hdx.scraper.ebola_bundibugyo.__main__.OUTPUT_CSV",
+                    output_dir / "combined_ebola_data.csv",
+                ),
+                patch("tempfile.TemporaryDirectory") as mock_tmpdir,
+            ):
+                mock_tmpdir.return_value.__enter__ = MagicMock(return_value=tmp_dir)
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                main()
+
+            df = pd.read_csv(output_dir / "combined_ebola_data.csv")
+            assert len(df) == 1
+            assert df.iloc[0]["Admin2"] == "Zone A"
+
+    def test_main_skips_missing_admin2(self, configuration):
+        from hdx.scraper.ebola_bundibugyo.__main__ import main
+
+        rows = [{"Zone": "A", "Cases": 10}]  # no Admin2 column
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            xlsx = self._make_xlsx(tmp_dir, "resource.xlsx", rows)
+            resource = self._make_resource(xlsx, "Données à la date du 1 juin 2026")
+
+            mock_dataset = MagicMock()
+            mock_dataset.get_resources.return_value = [resource]
+            output_dir = Path(tmp_dir) / "output_data"
+
+            with (
+                patch(
+                    "hdx.scraper.ebola_bundibugyo.__main__.Dataset.read_from_hdx",
+                    return_value=mock_dataset,
+                ),
+                patch(
+                    "hdx.scraper.ebola_bundibugyo.__main__.OUTPUT_CSV",
+                    output_dir / "combined_ebola_data.csv",
+                ),
+                patch("tempfile.TemporaryDirectory") as mock_tmpdir,
+            ):
+                mock_tmpdir.return_value.__enter__ = MagicMock(return_value=tmp_dir)
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                main()
+
+            assert not (output_dir / "combined_ebola_data.csv").exists()
+
     @pytest.mark.parametrize(
         "description,expected_as_of",
         [
@@ -144,3 +213,70 @@ class TestMain:
         from hdx.scraper.ebola_bundibugyo.__main__ import parse_french_date
 
         assert parse_french_date(description) == expected_as_of
+
+    def test_date_column_normalised(self, configuration):
+        from hdx.scraper.ebola_bundibugyo.__main__ import main
+
+        rows = [
+            {"Admin2": "Zone A", "Date": "2026-01-10"},
+            {"Admin2": "Zone B", "Date": "10/01/2026"},
+            {"Admin2": "Zone C", "Date": "January 10, 2026"},
+            {"Admin2": "Zone D", "Date": None},
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            xlsx = self._make_xlsx(tmp_dir, "resource.xlsx", rows)
+            resource = self._make_resource(xlsx, "Données à la date du 10 janvier 2026")
+
+            mock_dataset = MagicMock()
+            mock_dataset.get_resources.return_value = [resource]
+            output_dir = Path(tmp_dir) / "output_data"
+
+            with (
+                patch(
+                    "hdx.scraper.ebola_bundibugyo.__main__.Dataset.read_from_hdx",
+                    return_value=mock_dataset,
+                ),
+                patch(
+                    "hdx.scraper.ebola_bundibugyo.__main__.OUTPUT_CSV",
+                    output_dir / "combined_ebola_data.csv",
+                ),
+                patch("tempfile.TemporaryDirectory") as mock_tmpdir,
+            ):
+                mock_tmpdir.return_value.__enter__ = MagicMock(return_value=tmp_dir)
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                main()
+
+            df = pd.read_csv(output_dir / "combined_ebola_data.csv")
+            assert df.loc[0, "Date"] == "2026-01-10"
+            assert df.loc[1, "Date"] == "2026-01-10"
+            assert df.loc[2, "Date"] == "2026-01-10"
+            assert pd.isna(df.loc[3, "Date"])
+
+
+class TestNormaliseDate:
+    def test_timestamp(self):
+        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+
+        assert normalise_date(pd.Timestamp("2026-03-15")) == "2026-03-15"
+
+    def test_iso_string(self):
+        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+
+        assert normalise_date("2026-03-15") == "2026-03-15"
+
+    def test_ambiguous_string(self):
+        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+
+        assert normalise_date("January 10, 2026") == "2026-01-10"
+
+    def test_none_returns_none(self):
+        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+
+        assert normalise_date(None) is None
+        assert normalise_date(float("nan")) is None
+
+    def test_unparseable_returns_none(self):
+        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+
+        assert normalise_date("not a date") is None
