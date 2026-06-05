@@ -4,11 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**hdx-scraper-ebola_bundibugyo** downloads xlsx resources from the HDX dataset
-`republique-democratique-du-congo-cas-et-deces-d-ebola`, reads the "Data" sheet
-from each resource, parses the date from the resource description (French text
-like "… à la date du 24 mai 2026"), and writes a combined CSV to
-`saved_data/combined_ebola_data.csv` with an added "AsOf" column.
+**hdx-scraper-ebola_bundibugyo** downloads a single Google Sheets xlsx (URL in
+`config/project_configuration.yaml`), reads each date-named tab (e.g. `260524`),
+transforms the wide-format data into a long/tidy format, and writes the result to
+`output_data/combined_ebola_data.csv`.
 
 ## Commands
 
@@ -41,18 +40,35 @@ pre-commit run --all-files
 
 The pipeline in `__main__.py`:
 
-1. **`parse_french_date`** — Extracts an ISO date from a French description string
-   using a regex matching "à la date du DD MONTH YYYY".
-2. **`main`** — Reads the HDX dataset, iterates over xlsx resources, downloads each
-   to a temp directory, reads the "Data" sheet with pandas, adds the "AsOf" column,
-   concatenates all DataFrames, and saves the result as a CSV.
+1. **`normalise_date`** — Converts various date representations (Timestamp, ISO
+   string, locale strings like "5/19/2026") to an ISO date string.
+2. **`transform_tab`** — Takes a wide-format date tab DataFrame and melts it into
+   long/tidy rows. Skips rows with null `Date` or `Admin3Pcode`. Coerces non-numeric
+   cells (e.g. "ND") to NaN and omits those measures from the output.
+3. **`main`** — Reads the `xlsx_file` URL from `config/project_configuration.yaml`,
+   downloads the xlsx, reads the `Metadata` tab to enumerate date tabs, calls
+   `transform_tab` on each, deduplicates on
+   `(reference_date, location_code, measure, case_classification)` keeping the
+   latest tab's values, and saves the result to `output_data/combined_ebola_data.csv`.
+
+### Wide → long column mapping
+
+| Source column | `measure` | `case_classification` |
+|---|---|---|
+| `CasSuspect` | `cases` | `suspected` |
+| `DecesSuspect` | `deaths` | `suspected` |
+| `CasConfirmes` | `cases` | `confirmed` |
+| `DecesConfirmes` | `deaths` | `confirmed` |
+| `CasProbable` | `cases` | `probable` |
+| `Contacts` | `contacts` | *(null)* |
+| `Gueris` | `cases` | `recovered` |
 
 ### Key design points
 
-- **No config files**: All configuration is hardcoded as constants (`DATASET_NAME`,
-  `SHEET_NAME`, `OUTPUT_CSV`). There is no `config/` directory.
+- **Config file**: `config/project_configuration.yaml` holds `xlsx_file` (prod and
+  test variants). The prod URL is commented out; the test URL is active.
 - **Read-only**: This scraper never writes to HDX; it only downloads data.
-- **Output**: Written to `saved_data/` (git-ignored).
+- **Output**: Written to `output_data/` (git-ignored).
 
 ## Environment
 

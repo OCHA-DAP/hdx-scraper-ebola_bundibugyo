@@ -14,8 +14,9 @@ dynamic = ["version"]
 requires-python = ">=3.13"
 dependencies = [
   "hdx-python-api",
-  "pandas",
+  "gspread",
   "openpyxl",
+  "hdx-python-pipelineutils>=0.0.3",
 ]
 
 [dependency-groups]
