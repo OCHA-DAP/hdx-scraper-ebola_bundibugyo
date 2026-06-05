@@ -28,6 +28,7 @@ jobs:
           HDX_KEY: ${{ secrets.HDX_BOT_SCRAPERS_API_TOKEN }}
           PREPREFIX: ${{ vars.HDX_USER_AGENT_PREPREFIX }}
           USER_AGENT: ${{ vars.USER_AGENT }}
+          GSHEET_AUTH: ${{ secrets.HDX_PIPELINE_GSHEET_AUTH }}
 
         # 'uv run' executes the command inside the environment created by 'uv sync'
         run: |
