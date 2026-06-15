@@ -13,10 +13,9 @@ name = "hdx-scraper-ebola_bundibugyo"
 dynamic = ["version"]
 requires-python = ">=3.13"
 dependencies = [
-  "hdx-python-api",
   "gspread",
-  "openpyxl",
-  "hdx-python-pipelineutils>=0.0.3",
+  "hdx-python-api",
+  "hdx-python-country",
 ]
 
 [dependency-groups]
@@ -75,6 +74,7 @@ known-third-party = [
     "hdx.api",
     "hdx.data",
     "hdx.facades",
+    "hdx.location",
     "hdx.utilities",
 ]
 
