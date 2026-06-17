@@ -13,7 +13,6 @@ name = "hdx-scraper-ebola_bundibugyo"
 dynamic = ["version"]
 requires-python = ">=3.13"
 dependencies = [
-  "gspread",
   "hdx-python-api",
   "hdx-python-country",
 ]

@@ -4,5 +4,3 @@ sources:
   suspected_cases: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_suspected_cases__daily.csv"
   suspected_deaths: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_suspected_deaths__daily.csv"
   contacts: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_contacts_traced__daily.csv"
-output_gsheet: "https://docs.google.com/spreadsheets/d/1EMGaKz3Bu9l3a1pjzB_DIyDUwQkO2qs3iiGhcteJBt0/edit?gid=2032852241#gid=2032852241"
-output_gsheet_tab_id: 2032852241

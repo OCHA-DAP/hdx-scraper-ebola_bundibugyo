@@ -259,3 +259,92 @@ class TestPipeline:
             )
 
         assert_files_same(fixtures_dir / "combined_ebola_data.csv", output_path)
+
+
+class TestGenerateDataset:
+    _ROWS = [
+        {
+            "reference_date": "2026-05-19",
+            "location_name": "Bunia",
+            "measure": "cases",
+            "case_classification": "confirmed",
+            "value": 6,
+        },
+        {
+            "reference_date": "2026-05-14",
+            "location_name": "Mongbalu",
+            "measure": "deaths",
+            "case_classification": "suspected",
+            "value": 57,
+        },
+    ]
+
+    def test_dataset_metadata(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import (
+            _DATASET_NAME,
+            _DATASET_TITLE,
+            _MAINTAINER,
+            _OWNER_ORG,
+            _TAGS,
+            Pipeline,
+        )
+
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        MockDataset.assert_called_once_with(
+            {"name": _DATASET_NAME, "title": _DATASET_TITLE}
+        )
+        mock_ds.add_country_location.assert_called_once_with("COD")
+        mock_ds.set_maintainer.assert_called_once_with(_MAINTAINER)
+        mock_ds.set_organization.assert_called_once_with(_OWNER_ORG)
+        mock_ds.set_expected_update_frequency.assert_called_once_with("Every day")
+        mock_ds.set_subnational.assert_called_once_with(True)
+        mock_ds.add_tags.assert_called_once_with(_TAGS)
+
+    def test_time_period_from_rows(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import Pipeline
+
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        mock_ds.set_time_period.assert_called_once_with("2026-05-14", "2026-05-19")
+
+    def test_resource_generated(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import OUTPUT_COLUMNS, Pipeline
+
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        args, kwargs = mock_ds.generate_resource.call_args
+        assert args[1] == "drc_ebola_cases_consolidated.csv"
+        assert args[2] == self._ROWS
+        assert kwargs["headers"] == OUTPUT_COLUMNS
+
+    def test_returns_dataset(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import Pipeline
+
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            result = pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        assert result is mock_ds

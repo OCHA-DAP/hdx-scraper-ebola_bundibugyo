@@ -1,49 +1,60 @@
 import logging
-import sys
-import tempfile
-from os import getenv
-from pathlib import Path
+from os.path import expanduser, join
 
 from hdx.api.configuration import Configuration
 from hdx.facades.infer_arguments import facade
 from hdx.utilities.downloader import Download
-from hdx.utilities.easy_logging import setup_logging
+from hdx.utilities.path import (
+    script_dir_plus_file,
+    temp_dir,
+)
 from hdx.utilities.retriever import Retrieve
 
 from ._version import __version__
-from .gsheet import write_to_gsheet
-from .pipeline import Pipeline
+from .pipeline import _UPDATED_BY_SCRIPT, Pipeline
 
-setup_logging()
 logger = logging.getLogger(__name__)
 
 lookup = "hdx-scraper-ebola_bundibugyo"
 
 
-def main(gsheet_auth: str | None = None) -> None:
-    """Download DRC Ebola data from INRB-UMIE GitHub repo and write a long-format CSV."""
+def main(
+    save: bool = False,
+    use_saved: bool = False,
+) -> None:
+    """Download DRC Ebola data from INRB-UMIE and publish to HDX."""
     logger.info(f"##### {lookup} version {__version__} ####")
-
-    if gsheet_auth is None:
-        gsheet_auth = getenv("GSHEET_AUTH")
-    if gsheet_auth is None:
-        logger.error("No Google sheets authentication supplied!")
-        sys.exit(1)
 
     configuration = Configuration.read()
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
+    with temp_dir(folder=lookup) as tempdir:
         with Download() as downloader:
-            retriever = Retrieve(downloader, tmp_dir, tmp_dir, tmp_dir)
+            retriever = Retrieve(
+                downloader=downloader,
+                fallback_dir=tempdir,
+                saved_dir=tempdir,
+                temp_dir=tempdir,
+                save=save,
+                use_saved=use_saved,
+            )
             pipeline = Pipeline(configuration, retriever)
             rows = pipeline.run()
 
-    if not rows:
-        logger.warning("No data found!")
-        return
+        if not rows:
+            logger.warning("No data found!")
+            return
 
-    logger.info(f"Saving {len(rows)} rows to Google sheet")
-    write_to_gsheet(rows, gsheet_auth, configuration)
+        logger.info(f"Generating HDX dataset from {len(rows)} rows")
+        dataset = pipeline.generate_dataset(tempdir, rows)
+        dataset.update_from_yaml(
+            script_dir_plus_file(join("config", "hdx_dataset_static.yaml"), main)
+        )
+        logger.info(f"Updating {dataset['name']}")
+        dataset.create_in_hdx(
+            remove_additional_resources=True,
+            match_resource_order=False,
+            updated_by_script=_UPDATED_BY_SCRIPT,
+        )
 
     logger.info("HDX Scraper Ebola Bundibugyo completed!")
 
@@ -51,9 +62,9 @@ def main(gsheet_auth: str | None = None) -> None:
 if __name__ == "__main__":
     facade(
         main,
-        user_agent_config_yaml=str(Path.home() / ".useragents.yaml"),
+        user_agent_config_yaml=join(expanduser("~"), ".useragents.yaml"),
         user_agent_lookup=lookup,
-        project_config_yaml=str(
-            Path(__file__).parent / "config" / "project_configuration.yaml"
+        project_config_yaml=script_dir_plus_file(
+            join("config", "project_configuration.yaml"), main
         ),
     )

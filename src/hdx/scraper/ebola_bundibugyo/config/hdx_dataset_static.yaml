@@ -1,0 +1,13 @@
+license_id: cc-by
+methodology: Direct Observational Data/Anecdotal Data
+dataset_source: Centre des Opérations d'Urgences de Santé Publique (COUSP-RDC)
+package_creator: HDX Data Systems Team
+private: False
+notes: |
+  Ce jeu de données présente le nombre de cas et de décès liés à Ebola en République
+  démocratique du Congo, désagrégés au niveau administratif 3. Les données incluent
+  les cas suspects, probables et confirmés, ainsi que les décès suspects, probables et
+  confirmés, rapportés dans les zones affectées.
+
+  Le jeu de données est fourni sous une ressource CSV contenant la base de données
+  consolidée au format long.
