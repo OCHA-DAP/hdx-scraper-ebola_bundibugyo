@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**hdx-scraper-ebola_bundibugyo** downloads a single Google Sheets xlsx (URL in
-`config/project_configuration.yaml`), reads each date-named tab (e.g. `260524`),
-transforms the wide-format data into a long/tidy format, and writes the result to
-`output_data/combined_ebola_data.csv`.
+**hdx-scraper-ebola_bundibugyo** downloads five cumulative CSV files from the
+[INRB-UMIE GitHub repository](https://github.com/INRB-UMIE/BDBV2026-Data), transforms
+them into a single long-format dataset, and publishes it to HDX as
+[`republique-democratique-du-congo-cas-et-deces-d-ebola`](https://data.humdata.org/dataset/republique-democratique-du-congo-cas-et-deces-d-ebola).
 
 ## Commands
 
@@ -40,35 +40,45 @@ pre-commit run --all-files
 
 The pipeline in `__main__.py`:
 
-1. **`normalise_date`** — Converts various date representations (Timestamp, ISO
-   string, locale strings like "5/19/2026") to an ISO date string.
-2. **`transform_tab`** — Takes a wide-format date tab DataFrame and melts it into
-   long/tidy rows. Skips rows with null `Date` or `Admin3Pcode`. Coerces non-numeric
-   cells (e.g. "ND") to NaN and omits those measures from the output.
-3. **`main`** — Reads the `xlsx_file` URL from `config/project_configuration.yaml`,
-   downloads the xlsx, reads the `Metadata` tab to enumerate date tabs, calls
-   `transform_tab` on each, deduplicates on
-   `(reference_date, location_code, measure, case_classification)` keeping the
-   latest tab's values, and saves the result to `output_data/combined_ebola_data.csv`.
+1. **`pipeline.run()`** — Downloads the five source CSVs (confirmed/suspected cases and
+   deaths, plus contacts), looks up DRC admin3 pcodes via `AdminLevel`, melts each into
+   long-format rows, deduplicates on
+   `(reference_date, location_name, measure, case_classification)`, and returns the
+   sorted result.
+
+2. **`pipeline.generate_dataset(folder, rows)`** — Constructs an HDX `Dataset` object
+   using metadata from the template dataset, attaches a single CSV resource, and returns
+   it for upload.
+
+3. **`__main__.main`** — Wires the above together: `run()` → `generate_dataset()` →
+   `update_from_yaml()` → `create_in_hdx()`.
 
 ### Wide → long column mapping
 
 | Source column | `measure` | `case_classification` |
 |---|---|---|
-| `CasSuspect` | `cases` | `suspected` |
-| `DecesSuspect` | `deaths` | `suspected` |
-| `CasConfirmes` | `cases` | `confirmed` |
-| `DecesConfirmes` | `deaths` | `confirmed` |
-| `CasProbable` | `cases` | `probable` |
-| `Contacts` | `contacts` | *(null)* |
-| `Gueris` | `cases` | `recovered` |
+| confirmed cases CSV | `cases` | `confirmed` |
+| confirmed deaths CSV | `deaths` | `confirmed` |
+| suspected cases CSV | `cases` | `suspected` |
+| suspected deaths CSV | `deaths` | `suspected` |
+| contacts CSV | `contacts` | *(null)* |
 
 ### Key design points
 
-- **Config file**: `config/project_configuration.yaml` holds `xlsx_file` (prod and
-  test variants). The prod URL is commented out; the test URL is active.
-- **Read-only**: This scraper never writes to HDX; it only downloads data.
-- **Output**: Written to `output_data/` (git-ignored).
+- **`Retrieve`** (`hdx-python-utilities`) abstracts HTTP downloads and supports
+  save/replay via `save=True`/`use_saved=True` — used in tests to replay fixture data
+  from `tests/fixtures/input/`.
+- **Static config inside the package**: `config/` lives under
+  `src/hdx/scraper/ebola_bundibugyo/config/` so it is installed with the package and
+  located via `script_dir_plus_file`.
+- **`location_name_source`**: the raw `nom` value from the source CSV, preserved
+  alongside the canonical `location_name` resolved from the pcode lookup.
+
+### Config files
+
+- `src/hdx/scraper/ebola_bundibugyo/config/project_configuration.yaml` — source CSV URLs
+- `src/hdx/scraper/ebola_bundibugyo/config/hdx_dataset_static.yaml` — static HDX
+  metadata applied to the dataset (license, methodology, source, notes, etc.)
 
 ## Environment
 

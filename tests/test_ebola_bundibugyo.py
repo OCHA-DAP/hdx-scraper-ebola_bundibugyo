@@ -1,469 +1,209 @@
 import csv
-import json
-from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-_PCODE_TO_NAME = {
-    "CD5402ZS02": "Bunia",
-    "CD5405ZS10": "Mongbalu",
-    "CD1000ZS04": "Kinshasa",
-    "CD6110ZS01": "Butembo",
-    "CD9999ZS99": "",
-}
-
-
-def _stub_complete_admins(
-    admins, countryiso3, provider_adm_names, adm_codes, adm_names, fuzzy_match=True
-):
-    """Minimal stand-in: fills adm_names from test pcode map, returns adm_level."""
-    adm_level = len(adm_codes)
-    for i in range(len(adm_codes) - 1, -1, -1):
-        if adm_codes[i]:
-            adm_names[i] = _PCODE_TO_NAME.get(adm_codes[i], adm_codes[i])
-            return adm_level, []
-        adm_level -= 1
-    return 0, []
-
-
-@contextmanager
-def _patch_complete_admins():
-    with patch(
-        "hdx.scraper.ebola_bundibugyo.__main__.complete_admins",
-        side_effect=_stub_complete_admins,
-    ):
-        yield
-
-
-def _wide_row(
-    admin3: str,
-    pcode: str,
-    date,
-    cas_suspect=0,
-    deces_suspect=0,
-    cas_confirmes=0,
-    deces_confirmes=0,
-    cas_probable=None,
-    contacts=None,
-    gueris=0,
-) -> dict:
-    return {
-        "Admin1": "Province",
-        "Admin1Pcode": "CD10",
-        "Admin2": "Territory",
-        "Admin2Pcode": "CD1000",
-        "Admin3": admin3,
-        "Admin3Pcode": pcode if pcode is not None else "",
-        "Admin3PcodeReview": pcode if pcode is not None else "",
-        "CasSuspect": cas_suspect if cas_suspect is not None else "",
-        "DecesSuspect": deces_suspect if deces_suspect is not None else "",
-        "CasConfirmes": cas_confirmes if cas_confirmes is not None else "",
-        "DecesConfirmes": deces_confirmes if deces_confirmes is not None else "",
-        "CasProbable": cas_probable if cas_probable is not None else "",
-        "Contacts": contacts if contacts is not None else "",
-        "Gueris": gueris if gueris is not None else "",
-        "Date": date if date is not None else "",
-    }
-
-
-def _make_mock_admins(pcode_map: dict[str, str]) -> list[MagicMock]:
-    """Build a list of 3 mock AdminLevel objects sharing the same pcode_to_iso3 dict."""
-    admins = []
-    for _ in range(3):
-        admin = MagicMock()
-        admin.pcode_to_iso3 = pcode_map
-        admins.append(admin)
-    return admins
-
-
-def _make_mock_spreadsheet(tabs: dict[str, list[dict]]) -> MagicMock:
-    """Build a mock gspread Spreadsheet whose .worksheet(name).get_all_records() returns the given data."""
-    mock_spreadsheet = MagicMock()
-
-    worksheets = []
-    for title in tabs:
-        ws = MagicMock()
-        ws.title = title
-        worksheets.append(ws)
-    mock_spreadsheet.worksheets.return_value = worksheets
-
-    def worksheet_side_effect(name):
-        ws = MagicMock()
-        ws.get_all_records.return_value = tabs.get(name, [])
-        return ws
-
-    mock_spreadsheet.worksheet.side_effect = worksheet_side_effect
-    return mock_spreadsheet
-
-
-_META = ("2026-05-19", "2026-05-19")
-_ADMINS = _make_mock_admins(
-    {
-        "CD5402ZS02": "COD",
-        "CD5405ZS10": "COD",
-        "CD1000ZS04": "COD",
-        "CD6110ZS01": "COD",
-    }
-)
+from hdx.utilities.compare import assert_files_same
+from hdx.utilities.downloader import Download
+from hdx.utilities.retriever import Retrieve
 
 
 class TestNormaliseDate:
     def test_timestamp_string(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+        from hdx.scraper.ebola_bundibugyo.pipeline import normalise_date
 
         assert normalise_date("2026-03-15 00:00:00") == "2026-03-15"
 
     def test_iso_string(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+        from hdx.scraper.ebola_bundibugyo.pipeline import normalise_date
 
         assert normalise_date("2026-03-15") == "2026-03-15"
 
     def test_ambiguous_string(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+        from hdx.scraper.ebola_bundibugyo.pipeline import normalise_date
 
         assert normalise_date("January 10, 2026") == "2026-01-10"
 
     def test_none_returns_none(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+        from hdx.scraper.ebola_bundibugyo.pipeline import normalise_date
 
         assert normalise_date(None) is None
         assert normalise_date("") is None
 
     def test_unparseable_returns_none(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import normalise_date
+        from hdx.scraper.ebola_bundibugyo.pipeline import normalise_date
 
         assert normalise_date("not a date") is None
 
 
-class TestPrefixToIso3:
-    def test_iso2_prefix(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import _prefix_to_iso3
-
-        assert _prefix_to_iso3("CD5402ZS02") == "COD"
-
-    def test_iso3_prefix(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import _prefix_to_iso3
-
-        assert _prefix_to_iso3("COD001") == "COD"
-
-    def test_no_prefix_returns_none(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import _prefix_to_iso3
-
-        assert _prefix_to_iso3("123abc") is None
+def _write_csv(tmp_path: Path, content: str, name: str = "test.csv") -> Path:
+    p = tmp_path / name
+    p.write_text(content, encoding="utf-8")
+    return p
 
 
-class TestTransformTab:
-    def setup_method(self):
-        self._patcher = _patch_complete_admins()
-        self._patcher.__enter__()
+class TestParseSourceCsv:
+    def test_basic_confirmed_cases(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
 
-    def teardown_method(self):
-        self._patcher.__exit__(None, None, None)
+        p = _write_csv(
+            tmp_path,
+            "nom,date,cumulative_confirmed_cases\nBunia,2026-05-19,6\nMongbalu,2026-05-19,13\n",
+        )
+        rows = _parse_source_csv(
+            p, "cases", "confirmed", "https://example.com/cases.csv"
+        )
+        assert len(rows) == 2
+        bunia = next(r for r in rows if r["location_name"] == "Bunia")
+        assert bunia["measure"] == "cases"
+        assert bunia["case_classification"] == "confirmed"
+        assert bunia["value"] == 6
+        assert bunia["reference_date"] == "2026-05-19"
+        assert bunia["location_country"] == "COD"
+        assert bunia["location_level"] == 3
+        assert bunia["location_code"] == ""
+        assert bunia["location_code_type"] == "name"
+        assert bunia["time_period"] == "cumulative"
+        assert bunia["unit"] == "count"
+        assert bunia["source"] == "INRB-UMIE"
+        assert bunia["source_url"] == "https://example.com/cases.csv"
 
-    def test_basic_mapping(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
+    def test_contacts_has_none_classification(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
 
-        records = [
-            _wide_row(
-                "Bunia",
-                "CD5402ZS02",
-                "2026-05-19",
-                cas_suspect=90,
-                deces_suspect=23,
-                cas_confirmes=6,
-                deces_confirmes=0,
-                contacts=203,
-                gueris=0,
-            )
-        ]
-        result = transform_tab(records, *_META, _ADMINS)
+        p = _write_csv(
+            tmp_path,
+            "nom,date,cumulative_contacts_traced\nBunia,2026-05-19,203\n",
+        )
+        rows = _parse_source_csv(
+            p, "contacts", None, "https://example.com/contacts.csv"
+        )
+        assert len(rows) == 1
+        assert rows[0]["case_classification"] is None
 
-        assert {r["location_country"] for r in result} == {"COD"}
-        assert {r["location_level"] for r in result} == {3}
-        assert {r["location_code_type"] for r in result} == {"pcode"}
-        assert {r["reference_date"] for r in result} == {"2026-05-19"}
-        assert {r["reporting_period_start"] for r in result} == {"2026-05-19"}
-        assert {r["reporting_period_end"] for r in result} == {"2026-05-19"}
-        assert {r["time_period"] for r in result} == {"cumulative"}
-        assert {r["unit"] for r in result} == {"count"}
-        assert {r["location_name"] for r in result} == {"Bunia"}
-        assert {r["location_code"] for r in result} == {"CD5402ZS02"}
+    def test_nd_value_excluded(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
 
-        measures = {(r["measure"], r["case_classification"]) for r in result}
-        assert ("cases", "suspected") in measures
-        assert ("deaths", "suspected") in measures
-        assert ("cases", "confirmed") in measures
-        assert ("deaths", "confirmed") in measures
-        assert ("contacts", None) in measures
-        assert ("cases", "recovered") in measures
+        p = _write_csv(
+            tmp_path,
+            "nom,date,cumulative_confirmed_deaths\nBunia,2026-05-19,ND\nMongbalu,2026-05-19,5\n",
+        )
+        rows = _parse_source_csv(
+            p, "deaths", "confirmed", "https://example.com/deaths.csv"
+        )
+        assert len(rows) == 1
+        assert rows[0]["location_name"] == "Mongbalu"
 
-        cas_suspect_row = [
-            r
-            for r in result
-            if r["measure"] == "cases" and r["case_classification"] == "suspected"
-        ]
-        assert len(cas_suspect_row) == 1
-        assert cas_suspect_row[0]["value"] == 90
+    def test_empty_nom_row_skipped(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
 
-        contacts_row = [r for r in result if r["measure"] == "contacts"]
-        assert len(contacts_row) == 1
-        assert contacts_row[0]["value"] == 203
-        assert contacts_row[0]["case_classification"] is None
+        p = _write_csv(
+            tmp_path,
+            "nom,date,cumulative_confirmed_cases\n,2026-05-19,6\nBunia,2026-05-19,6\n",
+        )
+        rows = _parse_source_csv(
+            p, "cases", "confirmed", "https://example.com/cases.csv"
+        )
+        assert len(rows) == 1
 
-    def test_country_from_pcode_lookup(self):
-        """location_country comes from AdminLevel.pcode_to_iso3 dict."""
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
+    def test_empty_date_row_skipped(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
 
-        records = [_wide_row("Bunia", "CD5402ZS02", "2026-05-19", cas_suspect=10)]
-        result = transform_tab(records, *_META, _ADMINS)
-        assert {r["location_country"] for r in result} == {"COD"}
+        p = _write_csv(
+            tmp_path,
+            "nom,date,cumulative_confirmed_cases\nBunia,,6\nMongbalu,2026-05-19,13\n",
+        )
+        rows = _parse_source_csv(
+            p, "cases", "confirmed", "https://example.com/cases.csv"
+        )
+        assert len(rows) == 1
 
-    def test_country_from_prefix_fallback(self):
-        """If pcode not in admin lookup, falls back to prefix extraction."""
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
+    def test_value_is_int(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
 
-        records = [_wide_row("Unknown Zone", "CD9999ZS99", "2026-05-19", cas_suspect=5)]
-        admins = _make_mock_admins({})  # empty lookup → prefix fallback
-        result = transform_tab(records, *_META, admins)
-        assert {r["location_country"] for r in result} == {"COD"}
+        p = _write_csv(
+            tmp_path,
+            "nom,date,cumulative_confirmed_cases\nBunia,2026-05-19,6\n",
+        )
+        rows = _parse_source_csv(
+            p, "cases", "confirmed", "https://example.com/cases.csv"
+        )
+        assert isinstance(rows[0]["value"], int)
 
-    def test_row_date_used_as_reference_date(self):
-        """reference_date comes from the row's Date field; period fields come from metadata."""
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
+    def test_empty_csv_returns_empty_list(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
 
-        records = [_wide_row("Bunia", "CD5402ZS02", "2026-05-19", cas_suspect=10)]
-        result = transform_tab(records, "2026-05-24", "2026-05-27", _ADMINS)
-
-        assert {r["reference_date"] for r in result} == {"2026-05-19"}
-        assert {r["reporting_period_start"] for r in result} == {"2026-05-24"}
-        assert {r["reporting_period_end"] for r in result} == {"2026-05-27"}
-
-    def test_empty_date_string_rows_skipped(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
-
-        records = [
-            _wide_row("Bunia", "CD5402ZS02", "2026-05-19", cas_suspect=10),
-            _wide_row("Kinshasa", "CD1000ZS01", None, cas_suspect=5),
-        ]
-        result = transform_tab(records, *_META, _ADMINS)
-        assert {r["location_code"] for r in result} == {"CD5402ZS02"}
-
-    def test_empty_pcode_string_rows_skipped(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
-
-        records = [_wide_row("Unknown", None, "2026-05-19", cas_suspect=10)]
-        result = transform_tab(records, *_META, _ADMINS)
-        assert result == []
-
-    def test_non_numeric_values_excluded(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
-
-        records = [
-            _wide_row(
-                "Butembo",
-                "CD6110ZS01",
-                "2026-05-19",
-                cas_suspect=1,
-                cas_confirmes=1,
-                contacts="ND",
-            )
-        ]
-        result = transform_tab(records, *_META, _ADMINS)
-        assert not any(r["measure"] == "contacts" for r in result)
-        assert len(result) > 0
-
-    def test_empty_measure_values_excluded(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
-
-        records = [
-            _wide_row(
-                "Bunia", "CD5402ZS02", "2026-05-19", cas_suspect=10, cas_probable=None
-            )
-        ]
-        result = transform_tab(records, *_META, _ADMINS)
-        probable_rows = [
-            r
-            for r in result
-            if r["measure"] == "cases" and r["case_classification"] == "probable"
-        ]
-        assert len(probable_rows) == 0
-
-    def test_value_is_integer(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
-
-        records = [_wide_row("Bunia", "CD5402ZS02", "2026-05-19", cas_suspect=90)]
-        result = transform_tab(records, *_META, _ADMINS)
-        assert all(isinstance(r["value"], int) for r in result)
-
-    def test_empty_tab_returns_empty_list(self):
-        from hdx.scraper.ebola_bundibugyo.__main__ import transform_tab
-
-        result = transform_tab([], *_META, _ADMINS)
-        assert result == []
+        p = _write_csv(tmp_path, "nom,date,cumulative_confirmed_cases\n")
+        rows = _parse_source_csv(
+            p, "cases", "confirmed", "https://example.com/cases.csv"
+        )
+        assert rows == []
 
 
-class TestMain:
-    _fake_auth = json.dumps({"type": "service_account", "project_id": "test"})
+class TestPipelineRun:
+    _CONFIRMED_CASES = "nom,date,cumulative_confirmed_cases\nBunia,2026-05-19,6\nMongbalu,2026-05-19,13\n"
+    _CONFIRMED_DEATHS = "nom,date,cumulative_confirmed_deaths\nBunia,2026-05-19,ND\nMongbalu,2026-05-19,2\n"
+    _SUSPECTED_CASES = "nom,date,cumulative_suspected_cases\nBunia,2026-05-19,90\n"
+    _SUSPECTED_DEATHS = "nom,date,cumulative_suspected_deaths\nBunia,2026-05-19,23\n"
+    _CONTACTS = "nom,date,cumulative_contacts_traced\nBunia,2026-05-19,203\n"
 
-    def _build_tabs(self) -> dict[str, list[dict]]:
-        metadata = [
-            {
-                "tab_name": "260519",
-                "reporting_period_start": "2026-05-19",
-                "reporting_period_end": "2026-05-19",
-            },
-            {
-                "tab_name": "260527",
-                "reporting_period_start": "2026-05-24",
-                "reporting_period_end": "2026-05-27",
-            },
-        ]
-        tab519 = [
-            _wide_row(
-                "Bunia",
-                "CD5402ZS02",
-                "2026-05-19",
-                cas_suspect=90,
-                deces_suspect=23,
-                cas_confirmes=6,
-                deces_confirmes=0,
-                contacts=203,
-                gueris=0,
-            ),
-            _wide_row(
-                "Bunia",
-                "CD5402ZS02",
-                "2026-05-20",
-                cas_suspect=95,
-                deces_suspect=25,
-                cas_confirmes=7,
-                deces_confirmes=0,
-                contacts=210,
-                gueris=0,
-            ),
-            _wide_row("Kinshasa", "CD1000ZS04", None, cas_suspect=0),
-        ]
-        tab527 = [
-            _wide_row(
-                "Bunia",
-                "CD5402ZS02",
-                "2026-05-27",
-                cas_suspect=249,
-                deces_suspect=48,
-                cas_confirmes=37,
-                deces_confirmes=0,
-                contacts=404,
-                gueris=0,
-            ),
-        ]
-        return {"Metadata": metadata, "260519": tab519, "260527": tab527}
+    def _run_pipeline(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import Pipeline
 
-    def _run_main(self, tmp_path, tabs):
-        from hdx.scraper.ebola_bundibugyo.__main__ import main
-
-        output_csv = tmp_path / "output_data" / "combined_ebola_data.csv"
-        mock_spreadsheet = _make_mock_spreadsheet(tabs)
-        mock_config = MagicMock()
-        mock_config.__getitem__ = MagicMock(return_value="https://example.com/sheet")
-        mock_admins = _make_mock_admins({"CD5402ZS02": "COD", "CD1000ZS04": "COD"})
-
-        with (
-            patch(
-                "hdx.scraper.ebola_bundibugyo.__main__.Configuration.read",
-                return_value=mock_config,
-            ),
-            patch(
-                "hdx.scraper.ebola_bundibugyo.__main__.gspread.service_account_from_dict",
-                return_value=MagicMock(
-                    open_by_url=MagicMock(return_value=mock_spreadsheet)
-                ),
-            ),
-            patch(
-                "hdx.scraper.ebola_bundibugyo.__main__._setup_admins",
-                return_value=mock_admins,
-            ),
-            patch(
-                "hdx.scraper.ebola_bundibugyo.__main__.complete_admins",
-                side_effect=_stub_complete_admins,
-            ),
-            patch(
-                "hdx.scraper.ebola_bundibugyo.__main__.OUTPUT_CSV",
-                output_csv,
-            ),
-        ):
-            main(gsheet_auth=self._fake_auth)
-
-        return output_csv
-
-    def _read_csv(self, path) -> list[dict]:
-        with path.open() as f:
-            return list(csv.DictReader(f))
-
-    def test_main_produces_long_format_csv(self, configuration, tmp_path):
-        output_csv = self._run_main(tmp_path, self._build_tabs())
-
-        assert output_csv.exists()
-        rows = self._read_csv(output_csv)
-
-        assert {r["location_country"] for r in rows} == {"COD"}
-        assert {r["location_level"] for r in rows} == {"3"}
-        assert {r["location_code_type"] for r in rows} == {"pcode"}
-        assert {r["time_period"] for r in rows} == {"cumulative"}
-        assert {r["unit"] for r in rows} == {"count"}
-        assert {r["reference_date"] for r in rows} == {
-            "2026-05-19",
-            "2026-05-20",
-            "2026-05-27",
+        fixtures = {
+            "confirmed_cases": self._CONFIRMED_CASES,
+            "confirmed_deaths": self._CONFIRMED_DEATHS,
+            "suspected_cases": self._SUSPECTED_CASES,
+            "suspected_deaths": self._SUSPECTED_DEATHS,
+            "contacts": self._CONTACTS,
         }
+        csv_files = {}
+        for key, content in fixtures.items():
+            p = tmp_path / f"{key}.csv"
+            p.write_text(content, encoding="utf-8")
+            csv_files[key] = p
 
-    def test_main_metadata_dates_populated(self, configuration, tmp_path):
-        output_csv = self._run_main(tmp_path, self._build_tabs())
-        rows = self._read_csv(output_csv)
+        mock_sources = {k: f"https://example.com/{k}.csv" for k in fixtures}
 
-        rows_519 = [r for r in rows if r["reference_date"] == "2026-05-19"]
-        assert {r["reporting_period_start"] for r in rows_519} == {"2026-05-19"}
-        assert {r["reporting_period_end"] for r in rows_519} == {"2026-05-19"}
+        def mock_download_file(url, **kwargs):
+            key = next(k for k in csv_files if url.endswith(f"{k}.csv"))
+            return csv_files[key]
 
-        rows_527 = [r for r in rows if r["reference_date"] == "2026-05-27"]
-        assert {r["reporting_period_start"] for r in rows_527} == {"2026-05-24"}
-        assert {r["reporting_period_end"] for r in rows_527} == {"2026-05-27"}
+        mock_admin3 = MagicMock()
+        mock_admin3.get_pcode.return_value = (None, None)
 
-    def test_main_row_dates_preserved_across_dates_in_tab(
-        self, configuration, tmp_path
-    ):
-        """Rows with different Date values in the same tab produce separate reference_date rows."""
-        output_csv = self._run_main(tmp_path, self._build_tabs())
-        rows = self._read_csv(output_csv)
+        mock_retriever = MagicMock()
+        mock_retriever.download_file.side_effect = mock_download_file
 
-        row_519 = [
-            r
-            for r in rows
-            if r["location_code"] == "CD5402ZS02"
-            and r["reference_date"] == "2026-05-19"
-            and r["measure"] == "cases"
-            and r["case_classification"] == "suspected"
-        ]
-        assert len(row_519) == 1
-        assert int(row_519[0]["value"]) == 90
+        with patch(
+            "hdx.scraper.ebola_bundibugyo.pipeline.AdminLevel",
+            return_value=mock_admin3,
+        ):
+            pipeline = Pipeline({"sources": mock_sources}, mock_retriever)
+            return pipeline.run()
 
-        row_520 = [
-            r
-            for r in rows
-            if r["location_code"] == "CD5402ZS02"
-            and r["reference_date"] == "2026-05-20"
-            and r["measure"] == "cases"
-            and r["case_classification"] == "suspected"
-        ]
-        assert len(row_520) == 1
-        assert int(row_520[0]["value"]) == 95
+    def test_produces_rows(self, configuration, tmp_path):
+        rows = self._run_pipeline(configuration, tmp_path)
+        assert len(rows) > 0
 
-    def test_main_no_duplicate_rows(self, configuration, tmp_path):
-        output_csv = self._run_main(tmp_path, self._build_tabs())
-        rows = self._read_csv(output_csv)
+    def test_all_metrics_present(self, configuration, tmp_path):
+        rows = self._run_pipeline(configuration, tmp_path)
+        pairs = {(r["measure"], r["case_classification"]) for r in rows}
+        assert ("cases", "confirmed") in pairs
+        assert ("deaths", "confirmed") in pairs
+        assert ("cases", "suspected") in pairs
+        assert ("deaths", "suspected") in pairs
+        assert ("contacts", None) in pairs
 
+    def test_source_populated(self, configuration, tmp_path):
+        rows = self._run_pipeline(configuration, tmp_path)
+        assert all(r["source"] == "INRB-UMIE" for r in rows)
+
+    def test_no_duplicate_rows(self, configuration, tmp_path):
+        rows = self._run_pipeline(configuration, tmp_path)
         keys = [
             (
                 r["reference_date"],
-                r["location_code"],
+                r["location_name"],
                 r["measure"],
                 r["case_classification"],
             )
@@ -471,10 +211,140 @@ class TestMain:
         ]
         assert len(keys) == len(set(keys))
 
-    def test_main_output_columns(self, configuration, tmp_path):
-        from hdx.scraper.ebola_bundibugyo.__main__ import OUTPUT_COLUMNS
+    def test_nd_excluded(self, configuration, tmp_path):
+        rows = self._run_pipeline(configuration, tmp_path)
+        bunia_confirmed_deaths = [
+            r
+            for r in rows
+            if r["location_name"] == "Bunia"
+            and r["measure"] == "deaths"
+            and r["case_classification"] == "confirmed"
+        ]
+        assert len(bunia_confirmed_deaths) == 0
 
-        output_csv = self._run_main(tmp_path, self._build_tabs())
-        with output_csv.open() as f:
-            headers = next(csv.reader(f))
-        assert headers == OUTPUT_COLUMNS
+    def test_location_fields(self, configuration, tmp_path):
+        rows = self._run_pipeline(configuration, tmp_path)
+        assert {r["location_country"] for r in rows} == {"COD"}
+        assert {r["location_level"] for r in rows} == {3}
+        assert {r["location_code"] for r in rows} == {""}
+        assert {r["location_code_type"] for r in rows} == {"name"}
+
+
+class TestPipeline:
+    def test_output_fixture(self, configuration, fixtures_dir, input_dir, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import OUTPUT_COLUMNS, Pipeline
+
+        with Download(user_agent="test") as downloader:
+            retriever = Retrieve(
+                downloader=downloader,
+                fallback_dir=tmp_path,
+                saved_dir=input_dir,
+                temp_dir=tmp_path,
+                save=False,
+                use_saved=True,
+            )
+            pipeline = Pipeline(configuration, retriever)
+            rows = pipeline.run()
+
+        output_path = tmp_path / "combined_ebola_data.csv"
+        with output_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=OUTPUT_COLUMNS, restval="")
+            writer.writeheader()
+            writer.writerows(
+                {
+                    col: ("" if row.get(col) is None else row.get(col))
+                    for col in OUTPUT_COLUMNS
+                }
+                for row in rows
+            )
+
+        assert_files_same(fixtures_dir / "combined_ebola_data.csv", output_path)
+
+
+class TestGenerateDataset:
+    _ROWS = [
+        {
+            "reference_date": "2026-05-19",
+            "location_name": "Bunia",
+            "measure": "cases",
+            "case_classification": "confirmed",
+            "value": 6,
+        },
+        {
+            "reference_date": "2026-05-14",
+            "location_name": "Mongbalu",
+            "measure": "deaths",
+            "case_classification": "suspected",
+            "value": 57,
+        },
+    ]
+
+    def test_dataset_metadata(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import (
+            _DATASET_NAME,
+            _DATASET_TITLE,
+            _MAINTAINER,
+            _OWNER_ORG,
+            _TAGS,
+            Pipeline,
+        )
+
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        MockDataset.assert_called_once_with(
+            {"name": _DATASET_NAME, "title": _DATASET_TITLE}
+        )
+        mock_ds.add_country_location.assert_called_once_with("COD")
+        mock_ds.set_maintainer.assert_called_once_with(_MAINTAINER)
+        mock_ds.set_organization.assert_called_once_with(_OWNER_ORG)
+        mock_ds.set_expected_update_frequency.assert_called_once_with("Every day")
+        mock_ds.set_subnational.assert_called_once_with(True)
+        mock_ds.add_tags.assert_called_once_with(_TAGS)
+
+    def test_time_period_from_rows(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import Pipeline
+
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        mock_ds.set_time_period.assert_called_once_with("2026-05-14", "2026-05-19")
+
+    def test_resource_generated(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import OUTPUT_COLUMNS, Pipeline
+
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        args, kwargs = mock_ds.generate_resource.call_args
+        assert args[1] == "drc_ebola_cases_consolidated.csv"
+        assert args[2] == self._ROWS
+        assert kwargs["headers"] == OUTPUT_COLUMNS
+
+    def test_returns_dataset(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import Pipeline
+
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            result = pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        assert result is mock_ds

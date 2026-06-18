@@ -1,4 +1,6 @@
-# prod
-# google_sheet: "https://docs.google.com/spreadsheets/d/19jIOR-6l8s7U7tfYHXhi1zfSg9ObZTUVhLIBbDROdRc/edit"
-# test
-google_sheet: "https://docs.google.com/spreadsheets/d/1EMGaKz3Bu9l3a1pjzB_DIyDUwQkO2qs3iiGhcteJBt0/edit"
+sources:
+  confirmed_cases: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_confirmed_cases__daily.csv"
+  confirmed_deaths: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_confirmed_deaths__daily.csv"
+  suspected_cases: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_suspected_cases__daily.csv"
+  suspected_deaths: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_suspected_deaths__daily.csv"
+  contacts: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_contacts_traced__daily.csv"
