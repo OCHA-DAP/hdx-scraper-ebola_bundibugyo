@@ -139,6 +139,70 @@ class TestParseSourceCsv:
         assert rows == []
 
 
+class TestAmbiguousHealthZoneNames:
+    """COD has two admin3 health zones both named "Lubunga": CD510102 in
+    Tshopo (the outbreak location) and CD910703 in Kasai-Central. Without
+    admin_name_mappings, AdminLevel's name lookup is ambiguous between them.
+    """
+
+    def _build_admin3(self):
+        from hdx.location.adminlevel import AdminLevel
+
+        admin_config = {
+            "admin_name_mappings": {
+                "COD|Lubunga": "CD510102",
+                "COD|Lubunga (Tshopo)": "CD510102",
+            }
+        }
+        admin3 = AdminLevel(admin_config=admin_config, admin_level=3)
+        admin3.setup_from_iterable(
+            [
+                {
+                    "Location": "COD",
+                    "Admin Level": "3",
+                    "P-Code": "CD510102",
+                    "Name": "Lubunga",
+                    "Parent P-Code": "CD5101",
+                },
+                {
+                    "Location": "COD",
+                    "Admin Level": "3",
+                    "P-Code": "CD910703",
+                    "Name": "Lubunga",
+                    "Parent P-Code": "CD9107",
+                },
+            ],
+            countryiso3s=["COD"],
+        )
+        return admin3
+
+    def test_plain_name_resolves_to_tshopo_not_kasai_central(self):
+        admin3 = self._build_admin3()
+        pcode, _ = admin3.get_pcode("COD", "Lubunga")
+        assert pcode == "CD510102"
+
+    def test_suffixed_name_resolves_to_same_pcode(self):
+        admin3 = self._build_admin3()
+        pcode, _ = admin3.get_pcode("COD", "Lubunga (Tshopo)")
+        assert pcode == "CD510102"
+
+    def test_parse_source_csv_uses_mapped_pcode(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
+
+        admin3 = self._build_admin3()
+        p = _write_csv(
+            tmp_path,
+            "nom,date,cumulative_confirmed_cases\n"
+            "Lubunga (Tshopo),2026-07-10,1\n"
+            "Lubunga,2026-07-19,1\n",
+        )
+        rows = _parse_source_csv(
+            p, "cases", "confirmed", "https://example.com/cases.csv", admin3
+        )
+        assert {r["location_code"] for r in rows} == {"CD510102"}
+        assert {r["location_name"] for r in rows} == {"Lubunga"}
+
+
 class TestPipelineRun:
     _CONFIRMED_CASES = "nom,date,cumulative_confirmed_cases\nBunia,2026-05-19,6\nMongbalu,2026-05-19,13\n"
     _CONFIRMED_DEATHS = "nom,date,cumulative_confirmed_deaths\nBunia,2026-05-19,ND\nMongbalu,2026-05-19,2\n"

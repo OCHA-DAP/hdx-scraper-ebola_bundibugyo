@@ -142,7 +142,12 @@ class Pipeline:
         sources = self._configuration["sources"]
 
         logger.info("Setting up admin3 pcodes for COD")
-        admin3 = AdminLevel(admin_level=3, retriever=self._retriever)
+        admin_config = {
+            "admin_name_mappings": self._configuration.get("admin_name_mappings", {})
+        }
+        admin3 = AdminLevel(
+            admin_config=admin_config, admin_level=3, retriever=self._retriever
+        )
         admin3.setup_from_url(
             admin_url=AdminLevel.admin_all_pcodes_url,
             countryiso3s=["COD"],

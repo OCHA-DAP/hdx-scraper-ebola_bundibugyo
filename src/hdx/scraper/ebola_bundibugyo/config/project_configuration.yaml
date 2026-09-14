@@ -4,3 +4,9 @@ sources:
   suspected_cases: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_suspected_cases__daily.csv"
   suspected_deaths: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_suspected_deaths__daily.csv"
   contacts: "https://raw.githubusercontent.com/INRB-UMIE/BDBV2026-Data/main/data/insp_sitrep/processed/insp_sitrep__cumulative_contacts_traced__daily.csv"
+
+# ADM3 "Lubunga" is CD510102 in Tshopo, the outbreak location, and CD910703 in
+# Kasai-Central. AdminLevel's name-based lookup incorrectly resolves to CD910703.
+admin_name_mappings:
+  "COD|Lubunga": "CD510102"
+  "COD|Lubunga (Tshopo)": "CD510102"
