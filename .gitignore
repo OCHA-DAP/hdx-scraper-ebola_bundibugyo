@@ -177,3 +177,5 @@ output_data/
 
 # Mac files
 .DS_Store
+
+.claude
