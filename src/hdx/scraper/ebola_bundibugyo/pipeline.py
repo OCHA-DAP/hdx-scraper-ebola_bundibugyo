@@ -31,6 +31,19 @@ SOURCE_FILES = [
     ("contacts", "contacts", None),
 ]
 
+# National-level cumulative totals, published separately from the admin3
+# breakdown and not always equal to its sum (e.g. national confirmed deaths
+# includes deaths not reflected zone-by-zone). No national contacts file
+# exists.
+NATIONAL_SOURCE_FILES = [
+    ("national_confirmed_cases", "cases", "confirmed"),
+    ("national_confirmed_deaths", "deaths", "confirmed"),
+    ("national_suspected_cases", "cases", "suspected"),
+    ("national_suspected_deaths", "deaths", "suspected"),
+]
+
+_NATIONAL_LOCATION_NAME = "République démocratique du Congo"
+
 OUTPUT_COLUMNS = [
     "location_country",
     "location_level",
@@ -82,6 +95,7 @@ def _parse_source_csv(
     case_classification: str | None,
     source_url: str,
     admin3: AdminLevel | None = None,
+    location_level: int = 3,
 ) -> list[dict]:
     rows_out = []
     with path.open(encoding="utf-8", newline="") as f:
@@ -100,7 +114,11 @@ def _parse_source_csv(
             value = _to_numeric(row[value_col])
             if value is None:
                 continue
-            if admin3 is not None:
+            if location_level == 0:
+                location_code = "COD"
+                location_code_type = "iso3"
+                location_name = _NATIONAL_LOCATION_NAME
+            elif admin3 is not None:
                 pcode, _ = admin3.get_pcode("COD", nom)
                 location_code = pcode or ""
                 location_code_type = "pcode" if pcode else "name"
@@ -115,7 +133,7 @@ def _parse_source_csv(
             rows_out.append(
                 {
                     "location_country": "COD",
-                    "location_level": 3,
+                    "location_level": location_level,
                     "location_name": location_name,
                     "location_name_source": nom,
                     "location_code": location_code,
@@ -162,6 +180,16 @@ class Pipeline:
             logger.info(f"  Parsed {len(rows)} rows")
             all_rows.extend(rows)
 
+        for config_key, measure, classification in NATIONAL_SOURCE_FILES:
+            url = sources[config_key]
+            logger.info(f"Downloading {config_key}: {url}")
+            path = self._retriever.download_file(url)
+            rows = _parse_source_csv(
+                path, measure, classification, url, location_level=0
+            )
+            logger.info(f"  Parsed {len(rows)} rows")
+            all_rows.extend(rows)
+
         seen: dict[tuple, dict] = {}
         for row in all_rows:
             key = tuple(row.get(k) for k in DEDUP_KEY)
@@ -185,8 +213,8 @@ class Pipeline:
         dataset.add_tags(_TAGS)
 
         description = (
-            f"Consolidation des cas et des décès liés à Ebola, désagrégés au niveau"
-            f" administratif 3 du {start_date} au {end_date}"
+            f"Consolidation des cas et des décès liés à Ebola, désagrégés aux"
+            f" niveaux national et administratif 3 du {start_date} au {end_date}"
         )
         resourcedata = {
             "name": "drc_ebola_cases_consolidated",

@@ -138,6 +138,28 @@ class TestParseSourceCsv:
         )
         assert rows == []
 
+    def test_national_level(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_source_csv
+
+        p = _write_csv(
+            tmp_path,
+            "nom,date,national_cumulative_confirmed_deaths\nDRC,2026-05-19,10\n",
+        )
+        rows = _parse_source_csv(
+            p,
+            "deaths",
+            "confirmed",
+            "https://example.com/national_deaths.csv",
+            location_level=0,
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["location_level"] == 0
+        assert row["location_name"] == "République démocratique du Congo"
+        assert row["location_name_source"] == "DRC"
+        assert row["location_code"] == "COD"
+        assert row["location_code_type"] == "iso3"
+
 
 class TestAmbiguousHealthZoneNames:
     """COD has two admin3 health zones both named "Lubunga": CD510102 in
@@ -209,6 +231,18 @@ class TestPipelineRun:
     _SUSPECTED_CASES = "nom,date,cumulative_suspected_cases\nBunia,2026-05-19,90\n"
     _SUSPECTED_DEATHS = "nom,date,cumulative_suspected_deaths\nBunia,2026-05-19,23\n"
     _CONTACTS = "nom,date,cumulative_contacts_traced\nBunia,2026-05-19,203\n"
+    _NATIONAL_CONFIRMED_CASES = (
+        "nom,date,national_cumulative_confirmed_cases\nDRC,2026-05-19,120\n"
+    )
+    _NATIONAL_CONFIRMED_DEATHS = (
+        "nom,date,national_cumulative_confirmed_deaths\nDRC,2026-05-19,10\n"
+    )
+    _NATIONAL_SUSPECTED_CASES = (
+        "nom,date,national_cumulative_suspected_cases\nDRC,2026-05-19,470\n"
+    )
+    _NATIONAL_SUSPECTED_DEATHS = (
+        "nom,date,national_cumulative_suspected_deaths\nDRC,2026-05-19,95\n"
+    )
 
     def _run_pipeline(self, configuration, tmp_path):
         from hdx.scraper.ebola_bundibugyo.pipeline import Pipeline
@@ -219,6 +253,10 @@ class TestPipelineRun:
             "suspected_cases": self._SUSPECTED_CASES,
             "suspected_deaths": self._SUSPECTED_DEATHS,
             "contacts": self._CONTACTS,
+            "national_confirmed_cases": self._NATIONAL_CONFIRMED_CASES,
+            "national_confirmed_deaths": self._NATIONAL_CONFIRMED_DEATHS,
+            "national_suspected_cases": self._NATIONAL_SUSPECTED_CASES,
+            "national_suspected_deaths": self._NATIONAL_SUSPECTED_DEATHS,
         }
         csv_files = {}
         for key, content in fixtures.items():
@@ -289,9 +327,18 @@ class TestPipelineRun:
     def test_location_fields(self, configuration, tmp_path):
         rows = self._run_pipeline(configuration, tmp_path)
         assert {r["location_country"] for r in rows} == {"COD"}
-        assert {r["location_level"] for r in rows} == {3}
-        assert {r["location_code"] for r in rows} == {""}
-        assert {r["location_code_type"] for r in rows} == {"name"}
+        assert {r["location_level"] for r in rows} == {0, 3}
+
+        subnational = [r for r in rows if r["location_level"] == 3]
+        assert {r["location_code"] for r in subnational} == {""}
+        assert {r["location_code_type"] for r in subnational} == {"name"}
+
+        national = [r for r in rows if r["location_level"] == 0]
+        assert {r["location_code"] for r in national} == {"COD"}
+        assert {r["location_code_type"] for r in national} == {"iso3"}
+        assert {r["location_name"] for r in national} == {
+            "République démocratique du Congo"
+        }
 
 
 class TestPipeline:
