@@ -1,11 +1,13 @@
 import csv
 import logging
+from os.path import join
 from pathlib import Path
 
 from hdx.api.configuration import Configuration
 from hdx.data.dataset import Dataset
 from hdx.location.adminlevel import AdminLevel
 from hdx.utilities.dateparse import parse_date
+from hdx.utilities.path import script_dir_plus_file
 from hdx.utilities.retriever import Retrieve
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,19 @@ def _to_numeric(value) -> float | None:
         return None
 
 
+def _resolve_location(
+    nom: str, location_level: int, admin3: AdminLevel | None
+) -> tuple[str, str, str]:
+    if location_level == 0:
+        return "COD", "iso3", _NATIONAL_LOCATION_NAME
+    if admin3 is not None:
+        pcode, _ = admin3.get_pcode("COD", nom)
+        if pcode:
+            return pcode, "pcode", admin3.pcode_to_name[pcode]
+        return "", "name", nom
+    return "", "name", nom
+
+
 def _parse_source_csv(
     path: Path,
     measure: str,
@@ -114,22 +129,9 @@ def _parse_source_csv(
             value = _to_numeric(row[value_col])
             if value is None:
                 continue
-            if location_level == 0:
-                location_code = "COD"
-                location_code_type = "iso3"
-                location_name = _NATIONAL_LOCATION_NAME
-            elif admin3 is not None:
-                pcode, _ = admin3.get_pcode("COD", nom)
-                location_code = pcode or ""
-                location_code_type = "pcode" if pcode else "name"
-                if location_code:
-                    location_name = admin3.pcode_to_name[pcode]
-                else:
-                    location_name = nom
-            else:
-                location_code = ""
-                location_code_type = "name"
-                location_name = nom
+            location_code, location_code_type, location_name = _resolve_location(
+                nom, location_level, admin3
+            )
             rows_out.append(
                 {
                     "location_country": "COD",
@@ -146,6 +148,49 @@ def _parse_source_csv(
                     "unit": "count",
                     "source": "INRB-UMIE",
                     "source_url": source_url,
+                }
+            )
+    return rows_out
+
+
+def _parse_manual_additions(path: Path, admin3: AdminLevel | None) -> list[dict]:
+    rows_out = []
+    with path.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            nom = row.get("nom", "").strip()
+            date_str = row.get("date", "").strip()
+            measure = row.get("measure", "").strip()
+            if not nom or not date_str or not measure:
+                continue
+            ref_date = normalise_date(date_str)
+            if ref_date is None:
+                continue
+            value = _to_numeric(row.get("value"))
+            if value is None:
+                continue
+            case_classification = row.get("case_classification", "").strip() or None
+            location_level = int(row.get("location_level") or 3)
+            location_code, location_code_type, location_name = _resolve_location(
+                nom, location_level, admin3
+            )
+            rows_out.append(
+                {
+                    "location_country": "COD",
+                    "location_level": location_level,
+                    "location_name": location_name,
+                    "location_name_source": nom,
+                    "location_code": location_code,
+                    "location_code_type": location_code_type,
+                    "reference_date": ref_date,
+                    "measure": measure,
+                    "case_classification": case_classification,
+                    "time_period": "cumulative",
+                    "value": int(value),
+                    "unit": "count",
+                    "source": row.get("source", "").strip(),
+                    "data_quality_flag": "manual",
+                    "notes": row.get("notes", "").strip(),
                 }
             )
     return rows_out
@@ -189,6 +234,17 @@ class Pipeline:
             )
             logger.info(f"  Parsed {len(rows)} rows")
             all_rows.extend(rows)
+
+        manual_path = script_dir_plus_file(
+            join("config", "manual_additions.csv"), Pipeline
+        )
+        manual_rows = _parse_manual_additions(Path(manual_path), admin3)
+        logger.info(f"Parsed {len(manual_rows)} manual addition rows")
+
+        # Manual rows are appended last so they take precedence over downloaded
+        # rows sharing the same DEDUP_KEY, whether filling a gap or overriding a
+        # known-incorrect upstream value (see config/manual_additions.csv notes).
+        all_rows.extend(manual_rows)
 
         seen: dict[tuple, dict] = {}
         for row in all_rows:

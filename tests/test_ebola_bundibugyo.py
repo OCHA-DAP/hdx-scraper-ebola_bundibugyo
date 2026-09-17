@@ -161,6 +161,121 @@ class TestParseSourceCsv:
         assert row["location_code_type"] == "iso3"
 
 
+class TestResolveLocation:
+    def test_national_level(self):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _resolve_location
+
+        code, code_type, name = _resolve_location("DRC", 0, None)
+        assert code == "COD"
+        assert code_type == "iso3"
+        assert name == "République démocratique du Congo"
+
+    def test_admin3_with_pcode(self):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _resolve_location
+
+        admin3 = MagicMock()
+        admin3.get_pcode.return_value = ("CD540205", None)
+        admin3.pcode_to_name = {"CD540205": "Nyakunde"}
+        code, code_type, name = _resolve_location("Nyakunde", 3, admin3)
+        assert code == "CD540205"
+        assert code_type == "pcode"
+        assert name == "Nyakunde"
+
+    def test_admin3_unresolved_pcode(self):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _resolve_location
+
+        admin3 = MagicMock()
+        admin3.get_pcode.return_value = (None, None)
+        code, code_type, name = _resolve_location("Unknown Zone", 3, admin3)
+        assert code == ""
+        assert code_type == "name"
+        assert name == "Unknown Zone"
+
+    def test_no_admin3(self):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _resolve_location
+
+        code, code_type, name = _resolve_location("Bunia", 3, None)
+        assert code == ""
+        assert code_type == "name"
+        assert name == "Bunia"
+
+
+class TestParseManualAdditions:
+    def test_national_row(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_manual_additions
+
+        p = _write_csv(
+            tmp_path,
+            "nom,date,measure,case_classification,location_level,value,source,notes\n"
+            'DRC,2026-08-06,cases,confirmed,0,4120,"SitRep 083","Gap fill"\n',
+        )
+        rows = _parse_manual_additions(p, None)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["reference_date"] == "2026-08-06"
+        assert row["location_level"] == 0
+        assert row["location_name"] == "République démocratique du Congo"
+        assert row["location_code"] == "COD"
+        assert row["location_code_type"] == "iso3"
+        assert row["measure"] == "cases"
+        assert row["case_classification"] == "confirmed"
+        assert row["value"] == 4120
+        assert row["time_period"] == "cumulative"
+        assert row["unit"] == "count"
+        assert row["source"] == "SitRep 083"
+        assert row["notes"] == "Gap fill"
+        assert row["data_quality_flag"] == "manual"
+
+    def test_admin3_row_uses_admin3_lookup(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_manual_additions
+
+        admin3 = MagicMock()
+        admin3.get_pcode.return_value = ("CD540205", None)
+        admin3.pcode_to_name = {"CD540205": "Nyakunde"}
+        p = _write_csv(
+            tmp_path,
+            "nom,date,measure,case_classification,location_level,value,source,notes\n"
+            'Nyakunde,2026-08-06,cases,confirmed,3,10,"SitRep 083","Gap fill"\n',
+        )
+        rows = _parse_manual_additions(p, admin3)
+        assert len(rows) == 1
+        assert rows[0]["location_code"] == "CD540205"
+        assert rows[0]["location_name"] == "Nyakunde"
+
+    def test_nd_value_excluded(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_manual_additions
+
+        p = _write_csv(
+            tmp_path,
+            "nom,date,measure,case_classification,location_level,value,source,notes\n"
+            'DRC,2026-08-06,cases,confirmed,0,ND,"SitRep 083","Gap fill"\n',
+        )
+        rows = _parse_manual_additions(p, None)
+        assert rows == []
+
+    def test_header_only_returns_empty_list(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_manual_additions
+
+        p = _write_csv(
+            tmp_path,
+            "nom,date,measure,case_classification,location_level,value,source,notes\n",
+        )
+        rows = _parse_manual_additions(p, None)
+        assert rows == []
+
+    def test_contacts_has_none_classification(self, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import _parse_manual_additions
+
+        p = _write_csv(
+            tmp_path,
+            "nom,date,measure,case_classification,location_level,value,source,notes\n"
+            'DRC,2026-08-06,contacts,,0,10,"SitRep 083","Gap fill"\n',
+        )
+        rows = _parse_manual_additions(p, None)
+        assert len(rows) == 1
+        assert rows[0]["case_classification"] is None
+
+
 class TestAmbiguousHealthZoneNames:
     """COD has two admin3 health zones both named "Lubunga": CD510102 in
     Tshopo (the outbreak location) and CD910703 in Kasai-Central. Without
@@ -298,7 +413,11 @@ class TestPipelineRun:
 
     def test_source_populated(self, configuration, tmp_path):
         rows = self._run_pipeline(configuration, tmp_path)
-        assert all(r["source"] == "INRB-UMIE" for r in rows)
+        assert all(
+            r["source"] == "INRB-UMIE"
+            for r in rows
+            if r.get("data_quality_flag") != "manual"
+        )
 
     def test_no_duplicate_rows(self, configuration, tmp_path):
         rows = self._run_pipeline(configuration, tmp_path)
@@ -339,6 +458,49 @@ class TestPipelineRun:
         assert {r["location_name"] for r in national} == {
             "République démocratique du Congo"
         }
+
+    def test_manual_addition_fills_gap(self, configuration, tmp_path):
+        manual_csv = tmp_path / "manual_additions.csv"
+        manual_csv.write_text(
+            "nom,date,measure,case_classification,location_level,value,source,notes\n"
+            'DRC,2026-08-06,cases,confirmed,0,4120,"SitRep 083","Gap fill"\n',
+            encoding="utf-8",
+        )
+        with patch(
+            "hdx.scraper.ebola_bundibugyo.pipeline.script_dir_plus_file",
+            return_value=str(manual_csv),
+        ):
+            rows = self._run_pipeline(configuration, tmp_path)
+
+        matches = [r for r in rows if r["reference_date"] == "2026-08-06"]
+        assert len(matches) == 1
+        assert matches[0]["value"] == 4120
+        assert matches[0]["data_quality_flag"] == "manual"
+
+    def test_manual_addition_overrides_downloaded_row(self, configuration, tmp_path):
+        manual_csv = tmp_path / "manual_additions.csv"
+        manual_csv.write_text(
+            "nom,date,measure,case_classification,location_level,value,source,notes\n"
+            'DRC,2026-05-19,cases,confirmed,0,999,"Correction","Overrides downloaded"\n',
+            encoding="utf-8",
+        )
+        with patch(
+            "hdx.scraper.ebola_bundibugyo.pipeline.script_dir_plus_file",
+            return_value=str(manual_csv),
+        ):
+            rows = self._run_pipeline(configuration, tmp_path)
+
+        matches = [
+            r
+            for r in rows
+            if r["reference_date"] == "2026-05-19"
+            and r["measure"] == "cases"
+            and r["case_classification"] == "confirmed"
+            and r["location_level"] == 0
+        ]
+        assert len(matches) == 1
+        assert matches[0]["value"] == 999
+        assert matches[0]["data_quality_flag"] == "manual"
 
 
 class TestPipeline:
