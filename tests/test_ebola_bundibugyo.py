@@ -621,3 +621,21 @@ class TestGenerateDataset:
             result = pipeline.generate_dataset(str(tmp_path), self._ROWS)
 
         assert result is mock_ds
+
+    def test_data_dictionary_set_on_resource(self, configuration, tmp_path):
+        from hdx.scraper.ebola_bundibugyo.pipeline import OUTPUT_COLUMNS, Pipeline
+
+        data_dictionary = configuration["data_dictionary"]
+        mock_retriever = MagicMock()
+        pipeline = Pipeline(configuration, mock_retriever)
+
+        with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
+            mock_ds = MagicMock()
+            MockDataset.return_value = mock_ds
+            pipeline.generate_dataset(str(tmp_path), self._ROWS)
+
+        assert [column["field"] for column in data_dictionary] == OUTPUT_COLUMNS
+        mock_ds.get_resource.assert_called_once_with(0)
+        mock_ds.get_resource.return_value.set_hdx_data_dictionary.assert_called_once_with(
+            data_dictionary
+        )

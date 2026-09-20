@@ -284,4 +284,7 @@ class Pipeline:
             headers=OUTPUT_COLUMNS,
             no_empty=False,
         )
+        dataset.get_resource(0).set_hdx_data_dictionary(
+            self._configuration["data_dictionary"]
+        )
         return dataset

@@ -14,3 +14,89 @@ sources:
 admin_name_mappings:
   "COD|Lubunga": "CD510102"
   "COD|Lubunga (Tshopo)": "CD510102"
+
+data_dictionary:
+  - field: location_country
+    label: Location country
+    data_type: text
+    description: Country name
+  - field: location_level
+    label: Location level
+    data_type: numeric
+    description: "Administrative level (0-3)"
+  - field: location_name
+    label: Location name
+    data_type: text
+    description: Administrative unit or location row refers to
+  - field: location_name_source
+    label: Location name source
+    data_type: text
+    description: Source of location name used for this row
+  - field: location_code
+    label: Location code
+    data_type: text
+    description: "P-code identifying location from CODs (Common Operational Datasets)"
+  - field: location_code_type
+    label: Location code type
+    data_type: text
+    description: "Type of location code (e.g. p-code, name)"
+  - field: reference_date
+    label: Reference date
+    data_type: timestamp without time zone
+    description: Date of observation/record
+  - field: measure
+    label: Measure
+    data_type: text
+    description: "Measurement type (e.g. cases, contacts, deaths)"
+  - field: case_classification
+    label: Case classification
+    data_type: text
+    description: "Case classification: confirmed, suspected, blank (unclassified)"
+  - field: time_period
+    label: Time period
+    data_type: text
+    description: "Time period observation covers (e.g. cumulative)"
+  - field: value
+    label: Value
+    data_type: numeric
+    description: Numeric value of indicator/measurement
+  - field: unit
+    label: Unit
+    data_type: text
+    description: Unit of measurement for value column
+  - field: source
+    label: Source
+    data_type: text
+    description: Source of data point
+  - field: source_url
+    label: Source URL
+    data_type: text
+    description: URL of source of data point
+  - field: source_indicator_name
+    label: Source indicator name
+    data_type: text
+    description: Indicator name as used in original source
+  - field: indicator_label
+    label: Indicator label
+    data_type: text
+    description: Name or code of measured indicator
+  - field: reporting_period_start
+    label: Reporting period start
+    data_type: text
+    description: Start date of reporting period value covers
+  - field: reporting_period_end
+    label: Reporting period end
+    data_type: text
+    description: End date of reporting period value covers
+  - field: last_updated
+    label: Last updated
+    data_type: text
+    description: Date record was last updated
+  - field: data_quality_flag
+    label: Data quality flag
+    data_type: text
+    description: Flag indicating data quality issues or caveats for row
+  - field: notes
+    label: Notes
+    data_type: text
+    description: Free-text notes or comments about row
