@@ -19,7 +19,7 @@ data_dictionary:
   - field: location_country
     label: Location country
     data_type: text
-    description: Country name
+    description: Location code based on ISO 3166 alpha-3 standard
   - field: location_level
     label: Location level
     data_type: numeric
