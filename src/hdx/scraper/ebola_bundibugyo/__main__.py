@@ -54,7 +54,6 @@ def main(
             remove_additional_resources=True,
             match_resource_order=False,
             updated_by_script=_UPDATED_BY_SCRIPT,
-            force_update=True,
         )
 
     logger.info("HDX Scraper Ebola Bundibugyo completed!")
