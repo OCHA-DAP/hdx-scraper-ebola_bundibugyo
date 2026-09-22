@@ -276,7 +276,7 @@ class Pipeline:
             "name": "drc_ebola_cases_consolidated",
             "description": description,
         }
-        dataset.generate_resource(
+        _, results = dataset.generate_resource(
             folder,
             "drc_ebola_cases_consolidated.csv",
             rows,
@@ -284,7 +284,7 @@ class Pipeline:
             headers=OUTPUT_COLUMNS,
             no_empty=False,
         )
-        dataset.get_resource(0).set_hdx_data_dictionary(
+        results["resource"].set_hdx_data_dictionary(
             self._configuration["data_dictionary"]
         )
         return dataset

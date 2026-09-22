@@ -567,6 +567,7 @@ class TestGenerateDataset:
 
         with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
             mock_ds = MagicMock()
+            mock_ds.generate_resource.return_value = (True, {"resource": MagicMock()})
             MockDataset.return_value = mock_ds
             pipeline.generate_dataset(str(tmp_path), self._ROWS)
 
@@ -588,6 +589,7 @@ class TestGenerateDataset:
 
         with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
             mock_ds = MagicMock()
+            mock_ds.generate_resource.return_value = (True, {"resource": MagicMock()})
             MockDataset.return_value = mock_ds
             pipeline.generate_dataset(str(tmp_path), self._ROWS)
 
@@ -601,6 +603,7 @@ class TestGenerateDataset:
 
         with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
             mock_ds = MagicMock()
+            mock_ds.generate_resource.return_value = (True, {"resource": MagicMock()})
             MockDataset.return_value = mock_ds
             pipeline.generate_dataset(str(tmp_path), self._ROWS)
 
@@ -617,6 +620,7 @@ class TestGenerateDataset:
 
         with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
             mock_ds = MagicMock()
+            mock_ds.generate_resource.return_value = (True, {"resource": MagicMock()})
             MockDataset.return_value = mock_ds
             result = pipeline.generate_dataset(str(tmp_path), self._ROWS)
 
@@ -629,13 +633,15 @@ class TestGenerateDataset:
         mock_retriever = MagicMock()
         pipeline = Pipeline(configuration, mock_retriever)
 
+        mock_resource = MagicMock()
         with patch("hdx.scraper.ebola_bundibugyo.pipeline.Dataset") as MockDataset:
             mock_ds = MagicMock()
+            mock_ds.generate_resource.return_value = (
+                True,
+                {"resource": mock_resource},
+            )
             MockDataset.return_value = mock_ds
             pipeline.generate_dataset(str(tmp_path), self._ROWS)
 
         assert [column["field"] for column in data_dictionary] == OUTPUT_COLUMNS
-        mock_ds.get_resource.assert_called_once_with(0)
-        mock_ds.get_resource.return_value.set_hdx_data_dictionary.assert_called_once_with(
-            data_dictionary
-        )
+        mock_resource.set_hdx_data_dictionary.assert_called_once_with(data_dictionary)
