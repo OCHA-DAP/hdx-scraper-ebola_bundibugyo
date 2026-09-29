@@ -11,9 +11,12 @@ sources:
 
 # ADM3 "Lubunga" is CD510102 in Tshopo, the outbreak location, and CD910703 in
 # Kasai-Central. AdminLevel's name-based lookup incorrectly resolves to CD910703.
+# "Rumba" scores 80 against both Rimba (CD540707, Ituri) and Bumba (CD440401,
+# Mongala); RapidFuzzMatcher picks Bumba.
 admin_name_mappings:
   "COD|Lubunga": "CD510102"
   "COD|Lubunga (Tshopo)": "CD510102"
+  "COD|Rumba": "CD540707"
 
 data_dictionary:
   - field: location_country
